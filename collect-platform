@@ -1,0 +1,467 @@
+#! /bin/bash
+
+# 1. Determine platform
+PLATFORM=''
+if [ -n "$1" ]; then
+	PLATFORM="$1"
+
+	if [ "${PLATFORM}" = "auto" ]; then
+		PLATFORM=''
+	fi
+fi
+
+if [ -z "${PLATFORM}" ]; then
+	# Determine platform from what GCC was compiled for if possible
+	PLATFORM="$(gcc -dumpmachine 2>/dev/null)"
+fi
+
+if [ -z "${PLATFORM}" ]; then
+	case "$(uname -s)" in
+		SunOS)
+			case "$(uname -r)" in
+				5.*)
+					SOLARIS_VERSION="2.$(uname -r | cut -f 2 -d '.')"
+					;;
+				*)
+					SOLARIS_VERSION="1.$(uname -r | cut -f 2 -d '.')"
+					;;
+			esac
+
+			if isainfo 2>/dev/null | grep sparc >/dev/null; then
+				PLATFORM="sparc-sun-solaris${SOLARIS_VERSION}"
+			elif isainfo 2>/dev/null | grep i386 >/dev/null; then
+				PLATFORM="i386-pc-solaris${SOLARIS_VERSION}"
+			fi
+			;;
+		HP-UX)
+			HPUX_VERSION="$(uname -r | sed 's@^[A-Z][A-Z]*\.@@')"
+
+			if hp-pa 2>/dev/null >/dev/null; then
+				if [ -d '/usr/lib/pa20_64' ]; then
+					PLATFORM="hppa64-hp-hpux${HPUX_VERSION}"
+				else
+					PLATFORM="hppa1.1-hp-hpux${HPUX_VERSION}"
+				fi
+			else
+				PLATFORM="ia64-hp-hpux${HPUX_VERSION}"
+			fi
+			;;
+		NetBSD)
+			PLATFORM="$(uname -p)-unknown-netbsd$(uname -r | cut -f 1 -d '.')"
+			;;
+		FreeBSD)
+			# Determine more generic CPU platform name
+			cpu_platform="$(uname -p)"
+			case "${cpu_platform}" in
+				amd64)
+					cpu_platform="x86_64"
+					;;
+			esac
+
+			PLATFORM="${cpu_platform}-unknown-freebsd$(uname -r | cut -f 1 -d '.')"
+			;;
+		Darwin)
+			case "$(uname -r)" in
+				11.*)
+					cpu_platform="x86_64"
+					;;
+			esac
+			PLATFORM="${cpu_platform}-apple-darwin$(uname -r | cut -f 1 -d '.')"
+			;;
+		Linux)
+			libc=""
+			for testfile in /lib{,64}/libc-2.*.so; do
+				if [ ! -f "${testfile}" ]; then
+					continue
+				fi
+
+				libc="-gnu"
+
+				break
+			done
+
+			PLATFORM="$(uname -m)-unknown-linux${libc}"
+			;;
+		AIX)
+			PLATFORM="$(uname -p)-ibm-aix-$(uname -v).$(uname -r)"
+			;;
+	esac
+fi
+
+if [ -z "${PLATFORM}" ]; then
+	echo 'Unable to guess platform.  Try specifying the platform.' >&2
+
+	exit 1
+fi
+
+# 2. Create directory to hold system files
+PLATFORM_ROOT="/var/tmp/platform-$$${RANDOM}${RANDOM}${RANDOM}"
+PLATFORM_INCLUDE="${PLATFORM_ROOT}/include"
+PLATFORM_LIB="${PLATFORM_ROOT}/lib"
+PLATFORM_PKGCONFIG="${PLATFORM_ROOT}/lib/pkgconfig"
+
+rm -rf "${PLATFORM_ROOT}"
+mkdir -p "${PLATFORM_ROOT}" "${PLATFORM_LIB}" "${PLATFORM_INCLUDE}" "${PLATFORM_PKGCONFIG}"
+
+# 3. Collect header files
+case "${PLATFORM}" in
+	*-solaris2*)
+		# Libraries
+		mkdir "${PLATFORM_LIB}/64"
+		cp /usr/lib/64/*.o "${PLATFORM_LIB}/64/"
+		cp /lib/64/lib*.so* "${PLATFORM_LIB}/64/"
+		cp /lib/64/lib*.a "${PLATFORM_LIB}/64/"
+		cp /usr/lib/64/lib*.so* "${PLATFORM_LIB}/64/"
+		cp /usr/lib/64/lib*.a "${PLATFORM_LIB}/64/"
+		cp /usr/sfw/lib/64/lib*.so* "${PLATFORM_LIB}/64/"
+		cp /usr/sfw/lib/64/lib*.a "${PLATFORM_LIB}/64/"
+		if echo "${PLATFORM}" | grep '^sparc' >/dev/null; then
+			ln -s '64' "${PLATFORM_LIB}/sparcv9"
+		else
+			ln -s '64' "${PLATFORM_LIB}/amd64"
+		fi
+
+		cp /usr/lib/*.o "${PLATFORM_LIB}/"
+		cp /lib/lib*.so* "${PLATFORM_LIB}/"
+		cp /lib/lib*.a "${PLATFORM_LIB}/"
+		cp /usr/lib/lib*.so* "${PLATFORM_LIB}/"
+		cp /usr/lib/lib*.a "${PLATFORM_LIB}/"
+		cp /usr/sfw/lib/lib*.so* "${PLATFORM_LIB}/"
+		cp /usr/sfw/lib/lib*.a "${PLATFORM_LIB}/"
+		ln -s '.' "${PLATFORM_LIB}/32"
+
+		# Headers
+		cp -rp /usr/include/* "${PLATFORM_INCLUDE}/"
+
+		# "pkgconfig"
+		mkdir "${PLATFORM_LIB}/64/pkgconfig"
+		cp /usr/lib/pkgconfig/*.pc "${PLATFORM_PKGCONFIG}/"
+		cp /usr/sfw/lib/pkgconfig/*.pc "${PLATFORM_PKGCONFIG}/"
+		cp /usr/lib/64/pkgconfig/*.pc "${PLATFORM_LIB}/64/pkgconfig/"
+		cp /usr/sfw/lib/64/pkgconfig/*.pc "${PLATFORM_LIB}/64/pkgconfig/"
+		;;
+	*-linux*)
+		# Libraries
+		SRCLIB32='lib'
+		SRCLIB64=''
+
+		if [ -d '/usr/lib32' ]; then
+			SRCLIB32='lib32'
+		fi
+
+		if [ -d '/usr/lib64' ]; then
+			SRCLIB64='lib64'
+		elif [ -d '/usr/lib' -a -d '/usr/lib32' -a ! '/usr/lib' -ef '/usr/lib32' ]; then
+			SRCLIB64='lib'
+		fi
+
+		cp /usr/${SRCLIB32}/*.o "${PLATFORM_LIB}/"
+		cp /usr/${SRCLIB32}/lib*.so* "${PLATFORM_LIB}/"
+		cp /usr/${SRCLIB32}/lib*.a "${PLATFORM_LIB}/"
+		cp /usr/${SRCLIB32}/ld-*.so* "${PLATFORM_LIB}/"
+		cp /${SRCLIB32}/*.o "${PLATFORM_LIB}/"
+		cp /${SRCLIB32}/lib*.so* "${PLATFORM_LIB}/"
+		cp /${SRCLIB32}/lib*.a "${PLATFORM_LIB}/"
+		cp /${SRCLIB32}/ld-*.so* "${PLATFORM_LIB}/"
+
+		if [ -n "${SRCLIB64}" ]; then
+			PLATFORM_LIB64="${PLATFORM_ROOT}/lib64"
+			PLATFORM_PKGCONFIG64="${PLATFORM_LIB64}/pkgconfig"
+
+			mkdir -p "${PLATFORM_LIB64}" "${PLATFORM_PKGCONFIG64}"
+
+			cp /usr/${SRCLIB64}/*.o "${PLATFORM_LIB64}/"
+			cp /usr/${SRCLIB64}/lib*.so* "${PLATFORM_LIB64}/"
+			cp /usr/${SRCLIB64}/lib*.a "${PLATFORM_LIB64}/"
+			cp /usr/${SRCLIB64}/ld-*.so* "${PLATFORM_LIB64}/"
+			cp /${SRCLIB64}/*.o "${PLATFORM_LIB64}/"
+			cp /${SRCLIB64}/lib*.so* "${PLATFORM_LIB64}/"
+			cp /${SRCLIB64}/lib*.a "${PLATFORM_LIB64}/"
+			cp /${SRCLIB64}/ld-*.so* "${PLATFORM_LIB64}/"
+		else
+			echo 0 > "${PLATFORM_ROOT}/multilib"
+		fi
+
+		# Headers
+		cp -rp /usr/include/* "${PLATFORM_INCLUDE}/"
+
+		# "pkgconfig"
+		cp /usr/${SRCLIB32}/pkgconfig/*.pc "${PLATFORM_PKGCONFIG}/"
+		cp /${SRCLIB32}/pkgconfig/*.pc "${PLATFORM_PKGCONFIG}/"
+		if [ -n "${SRCLIB64}" ]; then
+			cp /usr/${SRCLIB64}/pkgconfig/*.pc "${PLATFORM_PKGCONFIG64}/"
+			cp /${SRCLIB64}/pkgconfig/*.pc "${PLATFORM_PKGCONFIG64}/"
+		fi
+		;;
+	*-aix*)
+		# Libraries
+		cp /usr/lib/*.o "${PLATFORM_LIB}/"
+		cp /usr/lib/*.exp "${PLATFORM_LIB}/"
+		cp /usr/lib/lib*.so* "${PLATFORM_LIB}/"
+		cp /usr/lib/lib*.a "${PLATFORM_LIB}/"
+
+		cp /lib/*.o "${PLATFORM_LIB}/"
+		cp /lib/*.exp "${PLATFORM_LIB}/"
+		cp /lib/lib*.so* "${PLATFORM_LIB}/"
+		cp /lib/lib*.a "${PLATFORM_LIB}/"
+
+		# Headers
+		cp -rp /usr/include/* "${PLATFORM_INCLUDE}/"
+		;;
+	*-netbsd*)
+		# Libraries
+		mkdir -p "${PLATFORM_ROOT}/libexec/"
+
+		## Determine the X11 sub-directory
+		for xdir in X11R7 X11R6 __fail__; do
+			if [ -d "/usr/${xdir}/lib" ]; then
+				break
+			fi
+
+			if [ "${xdir}" = "__fail__" ]; then
+				echo 'WARNING: Unable to find X11 libraries, collection will be incomplete!' >&2
+			fi
+		done
+
+		## Determine sub-archs
+		echo 0 > "${PLATFORM_ROOT}/multilib"
+		for subarch in i386 sparc; do
+			subarchdir="/usr/lib/${subarch}"
+			if [ ! -d "${subarchdir}" ]; then
+				continue
+			fi
+
+			platform_subarchdir="${PLATFORM_LIB}/${subarch}"
+
+			mkdir "${platform_subarchdir}"
+			cp "${subarchdir}"/*.o "${platform_subarchdir}/"
+			cp "${subarchdir}"/lib*.so "${platform_subarchdir}/"
+			cp "${subarchdir}"/lib*.a "${platform_subarchdir}/"
+			cp "/usr/libexec/ld.elf_so-${subarch}" "${PLATFORM_ROOT}/libexec/"
+
+			platform_subarchpkgcfgdir="${platform_subarchdir}/pkgconfig"
+			mkdir -p "${platform_subarchpkgcfgdir}"
+			cp "${subarchdir}"/pkgconfig/*.pc "${platform_subarchpkgcfgdir}/"
+
+			echo 1 > "${PLATFORM_ROOT}/multilib"
+		done
+
+		cp /usr/${xdir}/lib/lib*.so* "${PLATFORM_LIB}/"
+		cp /usr/${xdir}/lib/*.a "${PLATFORM_LIB}/"
+
+		cp /usr/lib/*.o "${PLATFORM_LIB}/"
+		cp /usr/lib/lib*.so* "${PLATFORM_LIB}/"
+		cp /usr/lib/lib*.a "${PLATFORM_LIB}/"
+
+		cp /lib/lib*.so* "${PLATFORM_LIB}/"
+		cp /lib/lib*.a "${PLATFORM_LIB}/"
+
+		# Shared object loader
+		cp /usr/libexec/ld.elf_so "${PLATFORM_ROOT}/libexec/"
+
+		# Headers
+		cp -rp /usr/${xdir}/include/* "${PLATFORM_INCLUDE}/"
+		cp -rp /usr/include/* "${PLATFORM_INCLUDE}/"
+
+		# "pkgconfig"
+		cp /usr/lib/pkgconfig/*.pc "${PLATFORM_PKGCONFIG}/"
+		;;
+	*-hpux11*)
+		# Libraries
+		if echo "${PLATFORM}" | grep '^hppa64-' >/dev/null; then
+			if [ -d '/usr/lib/pa20_64' ]; then
+				cp /usr/lib/pa20_64/*.o "${PLATFORM_LIB}"
+				cp /usr/ccs/lib/pa20_64/*.o "${PLATFORM_LIB}"
+
+				cp /usr/lib/pa20_64/lib*.[0-9] "${PLATFORM_LIB}"
+				cp /usr/lib/pa20_64/lib*.sl "${PLATFORM_LIB}"
+				cp /usr/lib/pa20_64/*.a "${PLATFORM_LIB}"
+
+				cp /usr/lib/X11R6/pa20_64/lib*.[0-9] "${PLATFORM_LIB}"
+				cp /usr/lib/X11R6/pa20_64/lib*.sl "${PLATFORM_LIB}"
+				cp /usr/lib/X11R6/pa20_64/*.a "${PLATFORM_LIB}"
+			fi
+
+			echo 0 > "${PLATFORM_ROOT}/multilib"
+		else
+			cp /usr/lib/*.o "${PLATFORM_LIB}"
+
+			cp /usr/lib/lib*.[0-9] "${PLATFORM_LIB}"
+			cp /usr/lib/lib*.sl "${PLATFORM_LIB}"
+			cp /usr/lib/*.a "${PLATFORM_LIB}"
+
+			cp /usr/lib/X11R6/lib*.[0-9] "${PLATFORM_LIB}"
+			cp /usr/lib/X11R6/lib*.sl "${PLATFORM_LIB}"
+			cp /usr/lib/X11R6/*.a "${PLATFORM_LIB}"
+		fi
+
+		## Create lib symlinks as needed
+		(
+			cd "${PLATFORM_LIB}" || exit 1
+
+			for libfile in *.[0-9]; do
+				if echo "${libfile}" | grep '\.sl' >/dev/null; then
+					continue
+				fi
+
+				shlib="$(echo "${libfile}" | sed 's@\.[0-9]$@@').sl"
+				if [ -f "${shlib}" ]; then
+					continue
+				fi
+
+				rm -f "${shlib}"
+				ln -s "${libfile}" "${shlib}"
+			done
+		)
+
+		# Headers
+		## Create all directories
+		(
+			cd /usr/include || exit 1
+
+			find . -type d
+		) | while read dir; do
+			mkdir "${PLATFORM_INCLUDE}/${dir}" >/dev/null 2>/dev/null
+		done
+
+		## Create all symlinks to directories
+		(
+			cd /usr/include || exit 1
+
+			find . -type l
+		) | while read link; do
+			if [ ! -d "/usr/include/${link}" ]; then
+				continue
+			fi
+
+			cp -R "/usr/include/${link}" "${PLATFORM_INCLUDE}/${link}"
+		done
+
+		## Create all files
+		(
+			cd /usr/include || exit 1
+
+			find . -type f
+		) | while read file; do
+			cat "/usr/include/${file}" > "${PLATFORM_INCLUDE}/${file}"
+		done
+		;;
+	*-darwin*)
+		# Determine path to SDK
+		## Determine Mac OS X version
+		macosxvers_maj='10'
+		macosxvers_min="$[$(uname -r | cut -f 1 -d '.') - 4]"
+
+		## Determine SDK path from version
+		sdkroot='/Developer/SDKs'
+		if [ -d "${sdkroot}/MacOSX${macosxvers_maj}.${macosxvers_min}.sdk" ]; then
+			sdkdir="${sdkroot}/MacOSX${macosxvers_maj}.${macosxvers_min}.sdk"
+		else
+			sdkdir="$(ls -1 "${sdkroot}/MacOSX${macosxvers_maj}.${macosxvers_min}*.sdk" | head -1)"
+		fi
+
+		# Libraries
+		cp /usr/lib/*.o "${PLATFORM_LIB}"
+		cp /usr/lib/lib*.dylib* "${PLATFORM_LIB}"
+		cp /usr/lib/lib*.a "${PLATFORM_LIB}"
+
+		cp /usr/lib/system/*.o "${PLATFORM_LIB}"
+		cp /usr/lib/system/lib*.dylib* "${PLATFORM_LIB}"
+		cp /usr/lib/system/lib*.a "${PLATFORM_LIB}"
+
+		# Headers
+		cp -rp /usr/include/* "${PLATFORM_INCLUDE}/"
+
+		# Frameworks
+		PLATFORM_FRAMEWORKS="${PLATFORM_ROOT}/System/Library/Frameworks"
+		export PLATFORM_FRAMEWORKS
+
+		mkdir -p "${PLATFORM_FRAMEWORKS}"
+		cp -rp "${sdkdir}/System/Library/Frameworks"/*.framework "${PLATFORM_FRAMEWORKS}"
+		;;
+	*)
+		# Print a warning if this is an unknown platform
+		case "${PLATFORM}" in
+			*-freebsd*)
+				# FreeBSD is generic, non-multilib
+				mkdir -p "${PLATFORM_ROOT}/libexec"
+				cp /libexec/ld-elf.so* "${PLATFORM_ROOT}/libexec/"
+				;;
+			*)
+				echo 'WARNING: Unknown system type, using generic collection' >&2
+				;;
+		esac
+
+		# Libraries
+		cp /usr/local/lib/*.o "${PLATFORM_LIB}"
+		cp /usr/local/lib/lib*.so* "${PLATFORM_LIB}"
+		cp /usr/local/lib/lib*.a "${PLATFORM_LIB}"
+		cp /usr/lib/*.o "${PLATFORM_LIB}"
+		cp /usr/lib/lib*.so* "${PLATFORM_LIB}"
+		cp /usr/lib/lib*.a "${PLATFORM_LIB}"
+		cp /lib/*.o "${PLATFORM_LIB}"
+		cp /lib/lib*.so* "${PLATFORM_LIB}"
+		cp /lib/lib*.a "${PLATFORM_LIB}"
+
+		# Headers
+		cp -rp /usr/local/include/* "${PLATFORM_INCLUDE}/"
+		cp -rp /usr/include/* "${PLATFORM_INCLUDE}/"
+
+		# "pkgconfig"
+		cp /usr/local/lib/pkgconfig/*.pc "${PLATFORM_PKGCONFIG}/"
+		cp /usr/lib/pkgconfig/*.pc "${PLATFORM_PKGCONFIG}/"
+		cp /lib/pkgconfig/*.pc "${PLATFORM_PKGCONFIG}/"
+
+		# Disable multilib since we only collected one platform
+		echo 0 > "${PLATFORM_ROOT}/multilib"
+		;;
+esac
+
+# 4. Create archive
+## Resolve symlinks
+find "${PLATFORM_ROOT}" -type l | while read link; do
+	if [ -d "${link}" ]; then
+		continue
+	fi
+
+	cat "${link}" > "${link}.new"
+	rm "${link}"
+	mv "${link}.new" "${link}"
+done
+
+## Re-create safe symlinks
+(
+	cd "${PLATFORM_ROOT}" || exit 1
+
+	prevhash=''; find . -type f | xargs openssl sha1  | sed 's@^SHA1(\(.*\))= \([0-9a-f][0-9a-f]*\)$@\2 \1@' | sort | while read hash file; do
+		file="$(echo "${file}" | sed 's@^\./@@')"
+
+		if [ "${hash}" = "${prevhash}" ]; then
+			numslashes="$(echo "${file}" | sed 's@[^/]@@g' | wc -c | awk '{ print $1 - 1 }')"
+			prefix=''
+			for ((idx = 0; $idx < $numslashes; idx++)); do
+				prefix="../${prefix}"
+			done
+
+			rm -f "${file}"
+			ln -s "${prefix}${prevfile}" "${file}"
+
+			continue
+		fi
+
+		prevhash="${hash}"
+		prevfile="${file}"
+	done
+)
+
+## Create archive
+(
+	cd "${PLATFORM_ROOT}" || exit 1
+
+	tar -cf - *
+) | bzip2 -9c > "${PLATFORM}-platform.tar.bz2"
+
+## Remove temporary files
+rm -rf "${PLATFORM_ROOT}"
+
+exit 0

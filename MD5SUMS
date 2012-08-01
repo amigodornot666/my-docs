@@ -1,0 +1,17 @@
+fb06e524f83712d778d7a29f03e48b17  LICENSE
+3b6fac5c2e63a18e4c6836d033aea01a  README
+6b76ece41f7a561cd3cf20f361df7a1c  build-cc
+735362cde4975d6344b826103b022b50  collect-platform
+78518451611a6175dfa18b5ab9dea03b  patches/gcc/gcc-4.6.1-fixgmon.diff
+4263d9c236a78f505c04e10112df7d50  patches/gcc/gcc-4.6.1-fixsonamelink.diff
+2ea27b5c98daf9b77085c21f3488addc  patches/gcc/gcc-4.6.1-netbsdmultilibs.diff
+2a48bfd54b7fa148cb64a10afa679065  platform/README.txt
+cbe287a3551303636705f5dcb4da9fb6  platform/hppa64-hp-hpux11.11-addons.tar.bz2
+fda1346788aadb20c5ef79f8c1a26cb8  scripts/common
+8c762384fa80cec8a366472720451c7e  scripts/gcc/solaris-complex-fix
+49bb644e7c8dd4323d87afdcd24b000b  scripts/post/00-linux-kernel
+5fa7eecdb0fd472c7aa74cca6df556a5  scripts/post/dietlibc
+bc112f6e9bb6f7dcc35bfdbd3a1ba0a9  scripts/post/glibc
+220f66b07a9151bd4ee6b06bbb077708  scripts/post/uclibc
+445eb9b3968dead2d04a065a4a42bde8  scripts/pre/darwin-cctools
+4f63f3dd545d7c96d0b7b6ab56d3705a  setup-cc
